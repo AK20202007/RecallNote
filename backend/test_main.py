@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 from main import app
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 
 client = TestClient(app)
@@ -58,7 +58,7 @@ def test_sync_multiple_notes():
 def test_conflict_resolution():
     now = datetime.now(timezone.utc)
     older = now.isoformat()
-    newer = datetime(now.year, now.month, now.day, now.hour, now.minute + 5, tzinfo=timezone.utc).isoformat()
+    newer = (now + timedelta(minutes=5)).isoformat()
     note_id = str(uuid.uuid4())
     
     # Sync older version
@@ -89,3 +89,23 @@ def test_conflict_resolution():
     final_res = client.get("/notes")
     note = next(n for n in final_res.json() if n["id"] == note_id)
     assert note["text_content"] == "New Content"
+
+def test_sync_malformed_payload():
+    response = client.post("/sync/notes", json=[{"id": "bad-data"}])
+    assert response.status_code == 422 # Unprocessable Entity from pydantic
+
+def test_sync_missing_optional_fields():
+    now = datetime.now(timezone.utc).isoformat()
+    note_id = str(uuid.uuid4())
+    payload = [{
+        "id": note_id,
+        "text_content": "No optional fields",
+        "created_at": now,
+        "updated_at": now
+    }]
+    response = client.post("/sync/notes", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["embedding"] is None
+    assert data[0]["speaker_id"] is None
+
